@@ -504,6 +504,7 @@ namespace AssetStudio
         public Vector3[] m_PositionValues;
         public Vector4[] m_QuaternionValues;
         public Vector3[] m_ScaleValues;
+        public int[] m_EntityIdValues;
 
         public ValueArray(ObjectReader reader)
         {
@@ -546,6 +547,11 @@ namespace AssetStudio
                     m_BoolValues = reader.ReadBooleanArray();
                     reader.AlignStream();
                 }
+
+                if (version.IsAtLeast(6000, 2)) //6000.2 and up
+                {
+                    m_EntityIdValues = reader.ReadInt32Array();
+                }
             }
         }
     }
@@ -584,6 +590,11 @@ namespace AssetStudio
 
         public AnimatorController(ObjectReader reader) : base(reader)
         {
+            if (version.IsAtLeast(6000, 4)) //6000.4 and up
+            {
+                var m_EvaluateTransitionsOnStart = reader.ReadBoolean();
+                reader.AlignStream();
+            }
             var m_ControllerSize = reader.ReadUInt32();
             var m_Controller = new ControllerConstant(reader);
 

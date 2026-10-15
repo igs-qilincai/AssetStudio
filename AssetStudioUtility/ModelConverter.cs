@@ -890,7 +890,7 @@ namespace AssetStudio
                         }
                     }
                     var m_DenseClip = m_Clip.m_DenseClip;
-                    var streamCount = m_Clip.m_StreamedClip.curveCount;
+                    var streamCount = m_Clip.m_StreamedClip.curveCount + m_Clip.m_StreamedClip.discreteCurveCount;
                     for (int frameIndex = 0; frameIndex < m_DenseClip.m_FrameCount; frameIndex++)
                     {
                         var time = m_DenseClip.m_BeginTime + frameIndex / m_DenseClip.m_SampleRate;

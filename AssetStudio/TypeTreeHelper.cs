@@ -43,7 +43,8 @@ namespace AssetStudio
                     value = reader.ReadByte();
                     break;
                 case "char":
-                    value = BitConverter.ToChar(reader.ReadBytes(2), 0);
+                    // 1 byte for native strings/vector<char> (e.g. Font.m_FontData), 2 bytes for C# char fields
+                    value = m_Node.m_ByteSize == 2 ? (char)reader.ReadUInt16() : (char)reader.ReadByte();
                     break;
                 case "short":
                 case "SInt16":
@@ -143,6 +144,11 @@ namespace AssetStudio
                             }
                             break;
                         }
+                        else if (IsUnknownLeaf(m_Nodes, i))
+                        {
+                            value = ReadUnknownLeaf(m_Node, reader);
+                            break;
+                        }
                         else //Class
                         {
                             append = false;
@@ -197,7 +203,8 @@ namespace AssetStudio
                     value = reader.ReadByte();
                     break;
                 case "char":
-                    value = BitConverter.ToChar(reader.ReadBytes(2), 0);
+                    // 1 byte for native strings/vector<char> (e.g. Font.m_FontData), 2 bytes for C# char fields
+                    value = m_Node.m_ByteSize == 2 ? (char)reader.ReadUInt16() : (char)reader.ReadByte();
                     break;
                 case "short":
                 case "SInt16":
@@ -284,6 +291,11 @@ namespace AssetStudio
                             value = list;
                             break;
                         }
+                        else if (IsUnknownLeaf(m_Nodes, i))
+                        {
+                            value = ReadUnknownLeaf(m_Node, reader);
+                            break;
+                        }
                         else //Class
                         {
                             var @class = GetNodes(m_Nodes, i);
@@ -303,6 +315,28 @@ namespace AssetStudio
             if (align)
                 reader.AlignStream();
             return value;
+        }
+
+        private static bool IsUnknownLeaf(List<TypeTreeNode> m_Nodes, int index)
+        {
+            var size = m_Nodes[index].m_ByteSize;
+            var hasChildren = index < m_Nodes.Count - 1 && m_Nodes[index + 1].m_Level > m_Nodes[index].m_Level;
+            return !hasChildren && (size == 1 || size == 2 || size == 4 || size == 8);
+        }
+
+        private static object ReadUnknownLeaf(TypeTreeNode m_Node, BinaryReader reader)
+        {
+            switch (m_Node.m_ByteSize)
+            {
+                case 1:
+                    return reader.ReadByte();
+                case 2:
+                    return reader.ReadInt16();
+                case 4:
+                    return reader.ReadInt32();
+                default:
+                    return reader.ReadInt64();
+            }
         }
 
         private static List<TypeTreeNode> GetNodes(List<TypeTreeNode> m_Nodes, int index)

@@ -58,7 +58,22 @@ namespace AssetStudio
                     {
                         var m_RayTraceProcedural = reader.ReadByte();
                     }
+                    if (version.IsAtLeast(2023, 2)) //2023.2 and up
+                    {
+                        var m_RayTracingAccelStructBuildFlagsOverride = reader.ReadByte();
+                        var m_RayTracingAccelStructBuildFlags = reader.ReadByte();
+                    }
+                    if (version.IsAtLeast(2023, 3)) //2023.3 (6000.0) and up
+                    {
+                        var m_SmallMeshCulling = reader.ReadByte();
+                    }
                     reader.AlignStream();
+                    if (version.IsAtLeast(6000, 2)) //6000.2 and up
+                    {
+                        var m_ForceMeshLod = reader.ReadInt16();
+                        reader.AlignStream();
+                        var m_MeshLodSelectionBias = reader.ReadSingle();
+                    }
                 }
                 else
                 {

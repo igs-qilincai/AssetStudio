@@ -91,7 +91,12 @@ namespace AssetStudio
             }
             if (version[0] > 2019 || (version[0] == 2019 && version[1] >= 3)) //2019.3 and up
             {
-                var m_IgnoreMasterTextureLimit = reader.ReadBoolean();
+                var m_IgnoreMasterTextureLimit = reader.ReadBoolean(); //m_IgnoreMipmapLimit 2022.2 and up
+            }
+            if (version.IsAtLeast(2022, 2)) //2022.2 and up
+            {
+                reader.AlignStream();
+                var m_MipmapLimitGroupName = reader.ReadAlignedString();
             }
             if (version[0] >= 3) //3.0.0 - 5.4
             {

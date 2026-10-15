@@ -145,6 +145,12 @@ namespace AssetStudio
             {
                 m_Bindpose = reader.ReadMatrixArray();
 
+                if (version.IsAtLeast(6000, 5)) //6000.5 and up
+                {
+                    var m_BlendShapes = new BlendShapeData(reader);
+                    reader.AlignStream();
+                }
+
                 if (version[0] == 2018 && version[1] < 2) //2018.2 down
                 {
                     var m_SourceSkinSize = reader.ReadInt32();
@@ -225,7 +231,7 @@ namespace AssetStudio
             }
 
             m_Extrude = reader.ReadUInt32();
-            if (version[0] > 5 || (version[0] == 5 && version[1] >= 3)) //5.3 and up
+            if ((version[0] > 5 || (version[0] == 5 && version[1] >= 3)) && !version.IsAtLeast(6000, 5)) //5.3 ~ 6000.4
             {
                 m_IsPolygon = reader.ReadBoolean();
                 reader.AlignStream();

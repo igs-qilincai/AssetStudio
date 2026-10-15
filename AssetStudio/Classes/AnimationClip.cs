@@ -459,11 +459,24 @@ namespace AssetStudio
     {
         public uint[] data;
         public uint curveCount;
+        public uint discreteCurveCount;
 
         public StreamedClip(ObjectReader reader)
         {
+            var version = reader.version;
+
             data = reader.ReadUInt32Array();
-            curveCount = reader.ReadUInt32();
+            //2022.3.19f1 ~ 2022.3.x, 2023.2.8f1 and up
+            if ((version.IsAtLeast(2022, 3, 19) && !version.IsAtLeast(2023, 1)) ||
+                (version.IsAtLeast(2023, 2, 8)))
+            {
+                curveCount = reader.ReadUInt16();
+                discreteCurveCount = reader.ReadUInt16();
+            }
+            else
+            {
+                curveCount = reader.ReadUInt32();
+            }
         }
 
         public class StreamedCurveKey

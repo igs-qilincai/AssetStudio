@@ -1,5 +1,6 @@
 ﻿using K4os.Compression.LZ4;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -19,7 +20,7 @@ namespace AssetStudio
                 using (var blobReader = new BinaryReader(new MemoryStream(decompressedBytes)))
                 {
                     var program = new ShaderProgram(blobReader, shader.version);
-                    program.Read(blobReader, 0);
+                    program.AddSegment(0, decompressedBytes);
                     return header + program.Export(Encoding.UTF8.GetString(shader.m_Script));
                 }
             }
@@ -45,14 +46,14 @@ namespace AssetStudio
                     var decompressedLength = shader.decompressedLengths[i][j];
                     var decompressedBytes = new byte[decompressedLength];
                     LZ4Codec.Decode(shader.compressedBlob, (int)offset, (int)compressedLength, decompressedBytes, 0, (int)decompressedLength);
-                    using (var blobReader = new BinaryReader(new MemoryStream(decompressedBytes)))
+                    if (j == 0)
                     {
-                        if (j == 0)
+                        using (var blobReader = new BinaryReader(new MemoryStream(decompressedBytes)))
                         {
                             shaderPrograms[i] = new ShaderProgram(blobReader, shader.version);
                         }
-                        shaderPrograms[i].Read(blobReader, j);
                     }
+                    shaderPrograms[i].AddSegment(j, decompressedBytes);
                 }
             }
 
@@ -68,7 +69,7 @@ namespace AssetStudio
 
             foreach (var m_SubShader in m_ParsedForm.m_SubShaders)
             {
-                sb.Append(ConvertSerializedSubShader(m_SubShader, platforms, shaderPrograms));
+                sb.Append(ConvertSerializedSubShader(m_SubShader, m_ParsedForm, platforms, shaderPrograms));
             }
 
             if (!string.IsNullOrEmpty(m_ParsedForm.m_FallbackName))
@@ -85,7 +86,7 @@ namespace AssetStudio
             return sb.ToString();
         }
 
-        private static string ConvertSerializedSubShader(SerializedSubShader m_SubShader, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms)
+        private static string ConvertSerializedSubShader(SerializedSubShader m_SubShader, SerializedShader m_ParsedForm, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms)
         {
             var sb = new StringBuilder();
             sb.Append("SubShader {\n");
@@ -98,13 +99,13 @@ namespace AssetStudio
 
             foreach (var m_Passe in m_SubShader.m_Passes)
             {
-                sb.Append(ConvertSerializedPass(m_Passe, platforms, shaderPrograms));
+                sb.Append(ConvertSerializedPass(m_Passe, m_ParsedForm, platforms, shaderPrograms));
             }
             sb.Append("}\n");
             return sb.ToString();
         }
 
-        private static string ConvertSerializedPass(SerializedPass m_Passe, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms)
+        private static string ConvertSerializedPass(SerializedPass m_Passe, SerializedShader m_ParsedForm, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms)
         {
             var sb = new StringBuilder();
             switch (m_Passe.m_Type)
@@ -138,51 +139,72 @@ namespace AssetStudio
                 {
                     sb.Append(ConvertSerializedShaderState(m_Passe.m_State));
 
-                    if (m_Passe.progVertex.m_SubPrograms.Length > 0)
-                    {
-                        sb.Append("Program \"vp\" {\n");
-                        sb.Append(ConvertSerializedSubPrograms(m_Passe.progVertex.m_SubPrograms, platforms, shaderPrograms));
-                        sb.Append("}\n");
-                    }
-
-                    if (m_Passe.progFragment.m_SubPrograms.Length > 0)
-                    {
-                        sb.Append("Program \"fp\" {\n");
-                        sb.Append(ConvertSerializedSubPrograms(m_Passe.progFragment.m_SubPrograms, platforms, shaderPrograms));
-                        sb.Append("}\n");
-                    }
-
-                    if (m_Passe.progGeometry.m_SubPrograms.Length > 0)
-                    {
-                        sb.Append("Program \"gp\" {\n");
-                        sb.Append(ConvertSerializedSubPrograms(m_Passe.progGeometry.m_SubPrograms, platforms, shaderPrograms));
-                        sb.Append("}\n");
-                    }
-
-                    if (m_Passe.progHull.m_SubPrograms.Length > 0)
-                    {
-                        sb.Append("Program \"hp\" {\n");
-                        sb.Append(ConvertSerializedSubPrograms(m_Passe.progHull.m_SubPrograms, platforms, shaderPrograms));
-                        sb.Append("}\n");
-                    }
-
-                    if (m_Passe.progDomain.m_SubPrograms.Length > 0)
-                    {
-                        sb.Append("Program \"dp\" {\n");
-                        sb.Append(ConvertSerializedSubPrograms(m_Passe.progDomain.m_SubPrograms, platforms, shaderPrograms));
-                        sb.Append("}\n");
-                    }
-
-                    if (m_Passe.progRayTracing?.m_SubPrograms.Length > 0)
-                    {
-                        sb.Append("Program \"rtp\" {\n");
-                        sb.Append(ConvertSerializedSubPrograms(m_Passe.progRayTracing.m_SubPrograms, platforms, shaderPrograms));
-                        sb.Append("}\n");
-                    }
+                    sb.Append(ConvertSerializedProgram("vp", m_Passe.progVertex, m_ParsedForm, platforms, shaderPrograms));
+                    sb.Append(ConvertSerializedProgram("fp", m_Passe.progFragment, m_ParsedForm, platforms, shaderPrograms));
+                    sb.Append(ConvertSerializedProgram("gp", m_Passe.progGeometry, m_ParsedForm, platforms, shaderPrograms));
+                    sb.Append(ConvertSerializedProgram("hp", m_Passe.progHull, m_ParsedForm, platforms, shaderPrograms));
+                    sb.Append(ConvertSerializedProgram("dp", m_Passe.progDomain, m_ParsedForm, platforms, shaderPrograms));
+                    sb.Append(ConvertSerializedProgram("rtp", m_Passe.progRayTracing, m_ParsedForm, platforms, shaderPrograms));
                 }
                 sb.Append("}\n");
             }
             return sb.ToString();
+        }
+
+        private static string ConvertSerializedProgram(string name, SerializedProgram program, SerializedShader m_ParsedForm, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms)
+        {
+            string body;
+            if (program == null)
+            {
+                return string.Empty;
+            }
+            if (program.m_SubPrograms.Length > 0)
+            {
+                body = ConvertSerializedSubPrograms(program.m_SubPrograms, platforms, shaderPrograms);
+            }
+            else if (program.m_PlayerSubPrograms != null && program.m_PlayerSubPrograms.Any(x => x.Length > 0)) //2021.3.10f1 and up
+            {
+                body = ConvertPlayerSubPrograms(program.m_PlayerSubPrograms, m_ParsedForm, platforms, shaderPrograms);
+            }
+            else
+            {
+                return string.Empty;
+            }
+            return $"Program \"{name}\" {{\n{body}}}\n";
+        }
+
+        private static string ConvertPlayerSubPrograms(SerializedPlayerSubProgram[][] m_PlayerSubPrograms, SerializedShader m_ParsedForm, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms)
+        {
+            var sb = new StringBuilder();
+            for (int tier = 0; tier < m_PlayerSubPrograms.Length; tier++)
+            {
+                foreach (var subProgram in m_PlayerSubPrograms[tier])
+                {
+                    for (int i = 0; i < platforms.Length; i++)
+                    {
+                        var platform = platforms[i];
+                        if (CheckGpuProgramUsable(platform, subProgram.m_GpuProgramType))
+                        {
+                            sb.Append($"SubProgram \"{GetPlatformString(platform)} hw_tier{tier:00}\" {{\n");
+                            if (subProgram.m_KeywordIndices.Length > 0 && m_ParsedForm.m_KeywordNames != null)
+                            {
+                                var keywords = subProgram.m_KeywordIndices.Where(x => x < m_ParsedForm.m_KeywordNames.Length).Select(x => $"\"{m_ParsedForm.m_KeywordNames[x]}\"");
+                                sb.Append($"Keywords {{ {string.Join(" ", keywords)} }}\n");
+                            }
+                            sb.Append(ExportSubProgram(shaderPrograms[i], subProgram.m_BlobIndex));
+                            sb.Append("\n}\n");
+                            break;
+                        }
+                    }
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static string ExportSubProgram(ShaderProgram shaderProgram, uint blobIndex)
+        {
+            var subProgram = shaderProgram?.GetSubProgram((int)blobIndex);
+            return subProgram != null ? subProgram.Export() : $"// Unable to read sub program {blobIndex}";
         }
 
         private static string ConvertSerializedSubPrograms(SerializedSubProgram[] m_SubPrograms, ShaderCompilerPlatform[] platforms, ShaderProgram[] shaderPrograms)
@@ -209,7 +231,7 @@ namespace AssetStudio
                                     sb.Append($"hw_tier{subProgram.m_ShaderHardwareTier:00} ");
                                 }
                                 sb.Append("\" {\n");
-                                sb.Append(shaderPrograms[i].m_SubPrograms[subProgram.m_BlobIndex].Export());
+                                sb.Append(ExportSubProgram(shaderPrograms[i], subProgram.m_BlobIndex));
                                 sb.Append("\n}\n");
                             }
                             break;
@@ -885,7 +907,8 @@ namespace AssetStudio
     public class ShaderProgram
     {
         public ShaderSubProgramEntry[] entries;
-        public ShaderSubProgram[] m_SubPrograms;
+        private readonly ShaderSubProgram[] m_SubPrograms;
+        private readonly Dictionary<int, byte[]> m_Segments = new Dictionary<int, byte[]>();
 
         public ShaderProgram(BinaryReader reader, int[] version)
         {
@@ -898,17 +921,43 @@ namespace AssetStudio
             m_SubPrograms = new ShaderSubProgram[subProgramsCapacity];
         }
 
-        public void Read(BinaryReader reader, int segment)
+        public void AddSegment(int segment, byte[] data)
         {
-            for (int i = 0; i < entries.Length; i++)
+            m_Segments[segment] = data;
+        }
+
+        /// <summary>
+        /// Sub programs are parsed on demand: since 2021.3 the blob also holds parameter blobs
+        /// (referenced by m_ParameterBlobIndices) that are not GPU programs.
+        /// </summary>
+        public ShaderSubProgram GetSubProgram(int index)
+        {
+            if (index < 0 || index >= entries.Length)
             {
-                var entry = entries[i];
-                if (entry.Segment == segment)
+                return null;
+            }
+            if (m_SubPrograms[index] == null)
+            {
+                var entry = entries[index];
+                if (!m_Segments.TryGetValue(entry.Segment, out var data))
                 {
-                    reader.BaseStream.Position = entry.Offset;
-                    m_SubPrograms[i] = new ShaderSubProgram(reader);
+                    return null;
+                }
+                try
+                {
+                    using (var reader = new BinaryReader(new MemoryStream(data)))
+                    {
+                        reader.BaseStream.Position = entry.Offset;
+                        m_SubPrograms[index] = new ShaderSubProgram(reader);
+                    }
+                }
+                catch (Exception e)
+                {
+                    Logger.Warning($"Unable to read shader sub program {index}: {e.Message}");
+                    return null;
                 }
             }
+            return m_SubPrograms[index];
         }
 
         public string Export(string shader)
@@ -916,7 +965,7 @@ namespace AssetStudio
             var evaluator = new MatchEvaluator(match =>
             {
                 var index = int.Parse(match.Groups[1].Value);
-                return m_SubPrograms[index].Export();
+                return GetSubProgram(index)?.Export() ?? match.Value;
             });
             shader = Regex.Replace(shader, "GpuProgramIndex (.+)", evaluator);
             return shader;
