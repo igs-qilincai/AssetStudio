@@ -31,8 +31,24 @@ namespace AssetStudio
         Lzham
     }
 
+    /// <summary>
+    /// Optional replacement for the managed LZ4/LZMA decoders used when reading bundles
+    /// (the browser build plugs in a WebAssembly implementation, much faster than interpreted .NET code).
+    /// </summary>
+    public interface IBundleDecompressor
+    {
+        /// <returns>Number of bytes written, or a negative value on error.</returns>
+        int DecompressLz4(byte[] source, int sourceOffset, int sourceLength, byte[] target, int targetOffset, int targetLength);
+
+        /// <param name="source">5-byte LZMA properties followed by the compressed stream, as stored in bundles.</param>
+        /// <returns>Number of bytes written, or a negative value on error.</returns>
+        int DecompressLzma(byte[] source, int sourceOffset, int sourceLength, byte[] target, int targetOffset, int targetLength);
+    }
+
     public class BundleFile
     {
+        public static IBundleDecompressor Decompressor;
+
         public class Header
         {
             public string signature;
@@ -257,6 +273,17 @@ namespace AssetStudio
                     }
                 case CompressionType.Lzma:
                     {
+                        if (Decompressor != null)
+                        {
+                            var uncompressedBytes = new byte[uncompressedSize];
+                            var numWrite = Decompressor.DecompressLzma(blocksInfoBytes, 0, blocksInfoBytes.Length, uncompressedBytes, 0, uncompressedBytes.Length);
+                            if (numWrite != uncompressedSize)
+                            {
+                                throw new IOException($"Lzma decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
+                            }
+                            blocksInfoUncompresseddStream = new MemoryStream(uncompressedBytes);
+                            break;
+                        }
                         blocksInfoUncompresseddStream = new MemoryStream((int)(uncompressedSize));
                         using (var blocksInfoCompressedStream = new MemoryStream(blocksInfoBytes))
                         {
@@ -269,7 +296,7 @@ namespace AssetStudio
                 case CompressionType.Lz4HC:
                     {
                         var uncompressedBytes = new byte[uncompressedSize];
-                        var numWrite = LZ4Codec.Decode(blocksInfoBytes, uncompressedBytes);
+                        var numWrite = DecodeLz4(blocksInfoBytes, 0, blocksInfoBytes.Length, uncompressedBytes, 0, uncompressedBytes.Length);
                         if (numWrite != uncompressedSize)
                         {
                             throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
@@ -328,6 +355,18 @@ namespace AssetStudio
                         }
                     case CompressionType.Lzma:
                         {
+                            if (Decompressor != null)
+                            {
+                                var compressedBytes = reader.ReadBytes((int)blockInfo.compressedSize);
+                                var uncompressedBytes = new byte[blockInfo.uncompressedSize];
+                                var numWrite = Decompressor.DecompressLzma(compressedBytes, 0, compressedBytes.Length, uncompressedBytes, 0, uncompressedBytes.Length);
+                                if (numWrite != uncompressedBytes.Length)
+                                {
+                                    throw new IOException($"Lzma decompression error, write {numWrite} bytes but expected {uncompressedBytes.Length} bytes");
+                                }
+                                blocksStream.Write(uncompressedBytes, 0, uncompressedBytes.Length);
+                                break;
+                            }
                             SevenZipHelper.StreamDecompress(reader.BaseStream, blocksStream, blockInfo.compressedSize, blockInfo.uncompressedSize);
                             break;
                         }
@@ -339,7 +378,7 @@ namespace AssetStudio
                             reader.Read(compressedBytes, 0, compressedSize);
                             var uncompressedSize = (int)blockInfo.uncompressedSize;
                             var uncompressedBytes = BigArrayPool<byte>.Shared.Rent(uncompressedSize);
-                            var numWrite = LZ4Codec.Decode(compressedBytes, 0, compressedSize, uncompressedBytes, 0, uncompressedSize);
+                            var numWrite = DecodeLz4(compressedBytes, 0, compressedSize, uncompressedBytes, 0, uncompressedSize);
                             if (numWrite != uncompressedSize)
                             {
                                 throw new IOException($"Lz4 decompression error, write {numWrite} bytes but expected {uncompressedSize} bytes");
@@ -354,6 +393,15 @@ namespace AssetStudio
                 }
             }
             blocksStream.Position = 0;
+        }
+
+        private static int DecodeLz4(byte[] source, int sourceOffset, int sourceLength, byte[] target, int targetOffset, int targetLength)
+        {
+            if (Decompressor != null)
+            {
+                return Decompressor.DecompressLz4(source, sourceOffset, sourceLength, target, targetOffset, targetLength);
+            }
+            return LZ4Codec.Decode(source, sourceOffset, sourceLength, target, targetOffset, targetLength);
         }
     }
 }
