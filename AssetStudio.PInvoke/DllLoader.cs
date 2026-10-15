@@ -27,10 +27,22 @@ namespace AssetStudio.PInvoke
 
         private static string GetDirectedDllDirectory()
         {
-            var localPath = Process.GetCurrentProcess().MainModule.FileName;
-            var localDir = Path.GetDirectoryName(localPath);
+            // AppContext.BaseDirectory is the app folder even when launched as `dotnet app.dll`
+            var localDir = AppContext.BaseDirectory;
 
-            var subDir = Environment.Is64BitProcess ? "x64" : "x86";
+            string subDir;
+            switch (RuntimeInformation.ProcessArchitecture)
+            {
+                case Architecture.Arm64:
+                    subDir = "arm64";
+                    break;
+                case Architecture.X64:
+                    subDir = "x64";
+                    break;
+                default:
+                    subDir = Environment.Is64BitProcess ? "x64" : "x86";
+                    break;
+            }
 
             var directedDllDir = Path.Combine(localDir, subDir);
 
@@ -89,6 +101,11 @@ namespace AssetStudio.PInvoke
 
                 var dllFileName = $"lib{dllName}{dllExtension}";
                 var directedDllPath = Path.Combine(dllDir, dllFileName);
+                if (!File.Exists(directedDllPath))
+                {
+                    // Not in the arch subfolder: leave it to the runtime's default probing (app folder)
+                    return;
+                }
 
                 const int ldFlags = RTLD_NOW | RTLD_GLOBAL;
                 var hLibrary = DlOpen(directedDllPath, ldFlags);

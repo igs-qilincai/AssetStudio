@@ -317,6 +317,9 @@ namespace crnd
 #include <stdio.h>
 #ifdef _WIN32
 #include <memory.h>
+#elif defined(__APPLE__)
+#include <malloc/malloc.h>
+#define malloc_usable_size malloc_size
 #else
 #include <malloc.h>
 #endif
@@ -374,15 +377,7 @@ namespace crnd
 
    const uint32 cIntBits = 32U;
 
-#ifdef _WIN64
-   typedef uint64 ptr_bits;
-#else
-   #ifdef __x86_64__
-      typedef uint64 ptr_bits;
-   #else
-      typedef uint32 ptr_bits;
-   #endif
-#endif
+   typedef ::uintptr_t ptr_bits;
 
    template<typename T> struct int_traits { enum { cMin = crnd::cINT32_MIN, cMax = crnd::cINT32_MAX, cSigned = true }; };
 
@@ -2530,7 +2525,7 @@ namespace crnd
          return NULL;
       }
 
-      CRND_ASSERT(((uint32)p_new & (CRND_MIN_ALLOC_ALIGNMENT - 1)) == 0);
+      CRND_ASSERT(((uint32)reinterpret_cast<ptr_bits>(p_new) & (CRND_MIN_ALLOC_ALIGNMENT - 1)) == 0);
 
       return p_new;
    }
@@ -2555,7 +2550,7 @@ namespace crnd
       if (pActual_size)
          *pActual_size = actual_size;
 
-      CRND_ASSERT(((uint32)p_new & (CRND_MIN_ALLOC_ALIGNMENT - 1)) == 0);
+      CRND_ASSERT(((uint32)reinterpret_cast<ptr_bits>(p_new) & (CRND_MIN_ALLOC_ALIGNMENT - 1)) == 0);
 
       return p_new;
    }

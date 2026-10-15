@@ -1,6 +1,4 @@
 ﻿using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Drawing;
-using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System;
@@ -34,16 +32,18 @@ namespace AssetStudio
 
         private static Image<Bgra32> CutImage(Sprite m_Sprite, Texture2D m_Texture2D, Rectf textureRect, Vector2 textureRectOffset, float downscaleMultiplier, SpriteSettings settingsRaw)
         {
-            var originalImage = m_Texture2D.ConvertToImage(false);
+            var originalImage = GetTextureImage(m_Texture2D);
             if (originalImage != null)
             {
-                using (originalImage)
+                Image<Bgra32> resizedImage = null;
+                try
                 {
                     if (downscaleMultiplier > 0f && downscaleMultiplier != 1f)
                     {
                         var width = (int)(m_Texture2D.m_Width / downscaleMultiplier);
                         var height = (int)(m_Texture2D.m_Height / downscaleMultiplier);
-                        originalImage.Mutate(x => x.Resize(width, height));
+                        resizedImage = originalImage.Clone(x => x.Resize(width, height));
+                        originalImage = resizedImage;
                     }
                     var rectX = (int)Math.Floor(textureRect.x);
                     var rectY = (int)Math.Floor(textureRect.y);
@@ -78,29 +78,11 @@ namespace AssetStudio
                     {
                         try
                         {
-                            var triangles = GetTriangles(m_Sprite.m_RD);
-                            var polygons = triangles.Select(x => new Polygon(new LinearLineSegment(x.Select(y => new PointF(y.X, y.Y)).ToArray()))).ToArray();
-                            IPathCollection path = new PathCollection(polygons);
-                            var matrix = Matrix3x2.CreateScale(m_Sprite.m_PixelsToUnits);
-                            matrix *= Matrix3x2.CreateTranslation(m_Sprite.m_Rect.width * m_Sprite.m_Pivot.X - textureRectOffset.X, m_Sprite.m_Rect.height * m_Sprite.m_Pivot.Y - textureRectOffset.Y);
-                            path = path.Transform(matrix);
-                            var graphicsOptions = new GraphicsOptions
-                            {
-                                Antialias = false,
-                                AlphaCompositionMode = PixelAlphaCompositionMode.DestOut
-                            };
-                            var options = new DrawingOptions
-                            {
-                                GraphicsOptions = graphicsOptions
-                            };
-                            using (var mask = new Image<Bgra32>(rect.Width, rect.Height, SixLabors.ImageSharp.Color.Black))
-                            {
-                                mask.Mutate(x => x.Fill(options, SixLabors.ImageSharp.Color.Red, path));
-                                var bursh = new ImageBrush(mask);
-                                spriteImage.Mutate(x => x.Fill(graphicsOptions, bursh));
-                                spriteImage.Mutate(x => x.Flip(FlipMode.Vertical));
-                                return spriteImage;
-                            }
+                            var triangles = GetMaskTriangles(m_Sprite, textureRectOffset);
+                            var mask = RasterizeTriangles(triangles, rect.Width, rect.Height);
+                            ApplyMask(spriteImage, mask, rect.Width, rect.Height);
+                            spriteImage.Mutate(x => x.Flip(FlipMode.Vertical));
+                            return spriteImage;
                         }
                         catch
                         {
@@ -112,12 +94,142 @@ namespace AssetStudio
                     spriteImage.Mutate(x => x.Flip(FlipMode.Vertical));
                     return spriteImage;
                 }
+                finally
+                {
+                    resizedImage?.Dispose();
+                }
             }
 
             return null;
         }
 
-        private static Vector2[][] GetTriangles(SpriteRenderData m_RD)
+        /// <summary>Number of decoded atlas textures kept in memory while cutting sprites.</summary>
+        public static int TextureCacheSize = 4;
+
+        private static readonly LinkedList<KeyValuePair<Texture2D, Image<Bgra32>>> textureCache = new LinkedList<KeyValuePair<Texture2D, Image<Bgra32>>>();
+
+        // Sprites usually share a few atlas textures; decoding the atlas once per sprite is the dominant export cost.
+        // The cache is not meant for exporting sprites from several threads at once.
+        private static Image<Bgra32> GetTextureImage(Texture2D m_Texture2D)
+        {
+            lock (textureCache)
+            {
+                for (var node = textureCache.First; node != null; node = node.Next)
+                {
+                    if (node.Value.Key == m_Texture2D)
+                    {
+                        textureCache.Remove(node);
+                        textureCache.AddFirst(node);
+                        return node.Value.Value;
+                    }
+                }
+            }
+            var image = m_Texture2D.ConvertToImage(false);
+            if (image == null)
+            {
+                return null;
+            }
+            lock (textureCache)
+            {
+                textureCache.AddFirst(new KeyValuePair<Texture2D, Image<Bgra32>>(m_Texture2D, image));
+                while (textureCache.Count > Math.Max(1, TextureCacheSize))
+                {
+                    textureCache.Last.Value.Value.Dispose();
+                    textureCache.RemoveLast();
+                }
+            }
+            return image;
+        }
+
+        public static void ClearTextureCache()
+        {
+            lock (textureCache)
+            {
+                foreach (var item in textureCache)
+                {
+                    item.Value.Dispose();
+                }
+                textureCache.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Mesh triangles of a tight sprite in pixel coordinates of the cropped texture rect (bottom-up),
+        /// flattened as x0,y0,x1,y1,x2,y2,... AssetStudioWeb's worker.js consumes the same data.
+        /// </summary>
+        public static float[] GetMaskTriangles(Sprite m_Sprite, AssetStudio.Vector2 textureRectOffset)
+        {
+            var triangles = GetTriangles(m_Sprite.m_RD);
+            var scale = m_Sprite.m_PixelsToUnits;
+            var dx = m_Sprite.m_Rect.width * m_Sprite.m_Pivot.X - textureRectOffset.X;
+            var dy = m_Sprite.m_Rect.height * m_Sprite.m_Pivot.Y - textureRectOffset.Y;
+            var result = new float[triangles.Length * 6];
+            for (int i = 0; i < triangles.Length; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                {
+                    result[i * 6 + j * 2] = triangles[i][j].X * scale + dx;
+                    result[i * 6 + j * 2 + 1] = triangles[i][j].Y * scale + dy;
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Marks pixels whose centre lies inside any triangle (edges inclusive). Unlike ImageSharp's non-antialiased
+        /// polygon fill this leaves no gaps along edges shared by neighbouring triangles.
+        /// Doubles are used so the browser build (worker.js) produces bit-identical masks.
+        /// </summary>
+        public static bool[] RasterizeTriangles(float[] triangles, int width, int height)
+        {
+            var mask = new bool[width * height];
+            for (int i = 0; i + 5 < triangles.Length; i += 6)
+            {
+                double ax = triangles[i], ay = triangles[i + 1], bx = triangles[i + 2], by = triangles[i + 3], cx = triangles[i + 4], cy = triangles[i + 5];
+                var area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+                if (area == 0)
+                    continue;
+                var sign = area > 0 ? 1 : -1;
+                var minX = Math.Max(0, (int)Math.Floor(Math.Min(ax, Math.Min(bx, cx))));
+                var maxX = Math.Min(width - 1, (int)Math.Ceiling(Math.Max(ax, Math.Max(bx, cx))));
+                var minY = Math.Max(0, (int)Math.Floor(Math.Min(ay, Math.Min(by, cy))));
+                var maxY = Math.Min(height - 1, (int)Math.Ceiling(Math.Max(ay, Math.Max(by, cy))));
+                for (int y = minY; y <= maxY; y++)
+                {
+                    var py = y + 0.5;
+                    for (int x = minX; x <= maxX; x++)
+                    {
+                        var px = x + 0.5;
+                        var w0 = ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) * sign;
+                        var w1 = ((cx - bx) * (py - by) - (cy - by) * (px - bx)) * sign;
+                        var w2 = ((ax - cx) * (py - cy) - (ay - cy) * (px - cx)) * sign;
+                        if (w0 >= 0 && w1 >= 0 && w2 >= 0)
+                            mask[y * width + x] = true;
+                    }
+                }
+            }
+            return mask;
+        }
+
+        // Pixels outside the mask become transparent. The mask is tiled like ImageSharp's ImageBrush did (relevant
+        // for 90° packed sprites), and fully transparent pixels are written as 0,0,0,0 as the old compositing did.
+        private static void ApplyMask(Image<Bgra32> image, bool[] mask, int maskWidth, int maskHeight)
+        {
+            for (int y = 0; y < image.Height; y++)
+            {
+                var row = image.GetPixelRowSpan(y);
+                var maskRow = (y % maskHeight) * maskWidth;
+                for (int x = 0; x < row.Length; x++)
+                {
+                    if (!mask[maskRow + x % maskWidth] || row[x].A == 0)
+                    {
+                        row[x] = default;
+                    }
+                }
+            }
+        }
+
+        public static Vector2[][] GetTriangles(SpriteRenderData m_RD)
         {
             if (m_RD.vertices != null) //5.6 down
             {

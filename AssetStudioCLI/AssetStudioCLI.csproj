@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>AssetStudioCLI</AssemblyName>
+    <Version>0.16.0.0</Version>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AssetStudio\AssetStudio.csproj" />
+    <ProjectReference Include="..\AssetStudioUtility\AssetStudioUtility.csproj" />
+  </ItemGroup>
+
+  <!-- Native texture decoder: built with clang on macOS/Linux, copied next to the executable. -->
+  <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <NativeDecoderDir>$(MSBuildThisFileDirectory)..\Texture2DDecoderNative\bin\native\</NativeDecoderDir>
+    <NativeDecoderLib Condition="$([MSBuild]::IsOSPlatform('OSX'))">libTexture2DDecoderNative.dylib</NativeDecoderLib>
+    <NativeDecoderLib Condition="!$([MSBuild]::IsOSPlatform('OSX'))">libTexture2DDecoderNative.so</NativeDecoderLib>
+  </PropertyGroup>
+
+  <Target Name="BuildNativeDecoder" BeforeTargets="BeforeBuild" Condition="'$(NativeDecoderLib)' != '' And !Exists('$(NativeDecoderDir)$(NativeDecoderLib)')">
+    <Exec Command="sh &quot;$(MSBuildThisFileDirectory)../Texture2DDecoderNative/build-native.sh&quot;" />
+  </Target>
+
+  <ItemGroup Condition="'$(NativeDecoderLib)' != ''">
+    <None Include="$(NativeDecoderDir)$(NativeDecoderLib)" Link="$(NativeDecoderLib)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
