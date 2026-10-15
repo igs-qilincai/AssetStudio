@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AssetStudio Web</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module" src="app.js"></script>
+</head>
+<body>
+    <header class="topbar">
+        <div class="brand">AssetStudio <span>Web</span></div>
+        <div class="topbar-actions">
+            <button id="btn-open" class="primary" disabled>開啟檔案</button>
+            <button id="btn-open-folder" disabled>開啟資料夾</button>
+            <form id="url-form" class="url-form">
+                <input id="url-input" type="url" placeholder="或貼上 bundle 網址（需同源或允許 CORS）" disabled>
+                <button id="btn-url" type="submit" disabled>載入</button>
+            </form>
+            <details class="advanced">
+                <summary>進階</summary>
+                <div class="popover">
+                    <label>指定 Unity 版本 <input id="unity-version" placeholder="例：6000.3.24f1"></label>
+                    <small>只在 bundle 的版本資訊被移除（stripped）時需要</small>
+                </div>
+            </details>
+            <button id="btn-clear" disabled>清除</button>
+        </div>
+        <input id="file-input" type="file" multiple hidden>
+        <input id="folder-input" type="file" webkitdirectory multiple hidden>
+    </header>
+
+    <main class="layout">
+        <aside class="sidebar">
+            <section>
+                <h2>已載入</h2>
+                <div id="file-summary" class="file-summary"><p class="muted">尚未載入檔案</p></div>
+            </section>
+            <section>
+                <h2>類型 <button id="btn-types-all" class="link">全選</button><button id="btn-types-none" class="link">全不選</button></h2>
+                <div id="type-filters" class="type-filters"></div>
+                <label class="toggle"><input id="show-all" type="checkbox"> 顯示所有物件（GameObject、Transform…）</label>
+            </section>
+            <section class="export-panel">
+                <h2>匯出</h2>
+                <label>模式
+                    <select id="export-mode">
+                        <option value="convert">轉換（PNG / 文字 / 字型 / JSON…）</option>
+                        <option value="raw">原始序列化資料（.dat）</option>
+                        <option value="dump">TypeTree Dump（.json）</option>
+                    </select>
+                </label>
+                <label>資料夾結構
+                    <select id="export-group">
+                        <option value="container">依 Container 路徑</option>
+                        <option value="type">依類型</option>
+                        <option value="source">依來源檔案</option>
+                        <option value="none">全部放一起</option>
+                    </select>
+                </label>
+                <label>圖片格式
+                    <select id="export-image-format">
+                        <option value="png">PNG</option>
+                        <option value="webp">WebP</option>
+                        <option value="jpeg">JPEG</option>
+                    </select>
+                </label>
+                <div class="export-buttons">
+                    <button id="btn-export-selected" disabled>匯出選取 (<span id="selected-count">0</span>)</button>
+                    <button id="btn-export-filtered" class="primary" disabled>匯出列表 (<span id="filtered-count">0</span>)</button>
+                </div>
+                <label class="toggle"><input id="export-to-folder" type="checkbox"> 直接寫入資料夾（不打包 ZIP）</label>
+                <hr>
+                <button id="btn-unpack" disabled>解出 bundle 內原始檔案</button>
+            </section>
+        </aside>
+
+        <section class="center">
+            <div class="tabs center-tabs">
+                <button class="tab active" data-view="assets">資產列表</button>
+                <button class="tab" data-view="bundle">Bundle 內容</button>
+            </div>
+            <div id="view-assets" class="view active">
+                <div class="toolbar">
+                    <input id="search" type="search" placeholder="搜尋名稱 / Container / PathID">
+                    <span id="result-count" class="muted"></span>
+                </div>
+                <div class="table" id="asset-table">
+                    <div class="thead">
+                        <div class="th col-name" data-sort="name">名稱</div>
+                        <div class="th col-type" data-sort="type">類型</div>
+                        <div class="th col-container" data-sort="container">Container</div>
+                        <div class="th col-size" data-sort="size">大小</div>
+                        <div class="th col-pathid" data-sort="pathId">PathID</div>
+                    </div>
+                    <div class="tbody" id="asset-rows" tabindex="0">
+                        <div class="spacer"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="view-bundle" class="view">
+                <div class="toolbar"><span class="muted">bundle 解壓縮後的原始檔（serialized file、.resS、.resource），可個別下載</span></div>
+                <div id="bundle-files" class="bundle-files"></div>
+            </div>
+            <div id="empty-state" class="empty-state">
+                <div class="drop-hint">
+                    <div class="drop-icon" aria-hidden="true">⇩</div>
+                    <p><strong>把 AssetBundle / .assets 檔拖曳到這裡</strong></p>
+                    <p class="muted">支援 UnityFS bundle（含 Unity 6000.x）、序列化 .assets、.resS、WebGL data。所有解析都在瀏覽器本機完成，檔案不會上傳。</p>
+                </div>
+            </div>
+        </section>
+
+        <aside class="preview">
+            <div class="tabs">
+                <button class="tab active" data-pane="preview">預覽</button>
+                <button class="tab" data-pane="dump">Dump</button>
+                <button class="tab" data-pane="info">資訊</button>
+            </div>
+            <div class="pane active" id="pane-preview"><p class="muted pad">選擇一個資產以預覽</p></div>
+            <div class="pane" id="pane-dump"><pre class="code"></pre></div>
+            <div class="pane" id="pane-info"><dl class="info"></dl></div>
+            <div class="preview-actions">
+                <button id="btn-download-current" disabled>下載此資產</button>
+            </div>
+        </aside>
+    </main>
+
+    <footer class="statusbar">
+        <span id="status">準備中…</span>
+        <div class="progress"><div id="progress-bar"></div></div>
+        <button id="btn-log" class="link">記錄 (<span id="log-count">0</span>)</button>
+    </footer>
+    <div id="log-panel" class="log-panel" hidden>
+        <div class="log-head"><strong>記錄</strong><button id="btn-log-close" class="link">關閉</button></div>
+        <div id="log-list"></div>
+    </div>
+    <div id="drop-overlay" class="drop-overlay" hidden><div>放開以載入檔案</div></div>
+</body>
+</html>
